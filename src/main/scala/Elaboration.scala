@@ -13,12 +13,31 @@ import Value.VTy.*
 import Evaluation.*
 import Unification.*
 import Errors.*
+import Metas.*
+import Zonking.*
 import Debug.debug
 
 import scala.util.parsing.input.{Position, NoPosition}
 import scala.annotation.tailrec
 
 object Elaboration:
+  private def newMeta(ctx: Ctx): Ty = TMeta(freshTMeta(ctx.lvl))
+
+  private def insertForall(ctx: Ctx, inp: (Tm, VTy)): (Tm, VTy) =
+    val (tm, ty) = inp
+    force(ty) match
+      case VForall(x, a, b) =>
+        val m = newMeta(ctx)
+        val mv = ctx.eval(m)
+        insertForall(ctx, (AppTy(tm, m), vinst(b, mv)))
+      case _ => (tm, ty)
+
+  private def insert(ctx: Ctx, inp: (Tm, VTy)): (Tm, VTy) =
+    val (tm, ty) = inp
+    tm match
+      case LamTy(_, _, _) => (tm, ty)
+      case _              => insertForall(ctx, (tm, ty))
+
   private def unifyKindCatch(k1: Kind, k2: Kind): Unit =
     try unifyKind(k1, k2)
     catch case e: UnifyError => throw KindMismatchError(s"$k1 ~ $k2: $e")
@@ -78,7 +97,7 @@ object Elaboration:
 
   private def check(ctx0: Ctx, tm: STm, ty: VTy): Tm =
     val ctx = ctx0.enter(tm.pos)
-    (tm, ty) match
+    (tm, force(ty)) match
       case (S.Lam(x, oty, body), VFun(pty, rty)) =>
         oty.foreach { ty =>
           val ety = checkType(ctx, ty, KType)
@@ -102,7 +121,7 @@ object Elaboration:
         val ebody = check(ctx.bind(x, vty), body, ty)
         Let(x, ety, evalue, ebody)
       case (tm, _) =>
-        val (etm, tyActual) = infer(ctx, tm)
+        val (etm, tyActual) = insert(ctx, infer(ctx, tm))
         coe(ctx, etm, tyActual, ty)
 
   private def infer(ctx0: Ctx, tm: STm): (Tm, VTy) =
@@ -117,21 +136,27 @@ object Elaboration:
         val (ebody, rty) = infer(ctx.bind(x, vty), body)
         (Let(x, ety, evalue, ebody), rty)
       case S.App(fn, arg) =>
-        val (efn, fnty) = infer(ctx, fn)
-        fnty match
+        val (efn, fnty) = insertForall(ctx, infer(ctx, fn))
+        force(fnty) match
           case VFun(pty, rty) =>
             val earg = check(ctx, arg, pty)
             (App(efn, earg), rty)
           case _ => throw NotAFunError(tm.toString)
-      case S.Lam(x, Some(ty), body) =>
-        val ety = checkType(ctx, ty, KType)
-        val vty = ctx.eval(ety)
-        val (ebody, rty) = infer(ctx.bind(x, vty), body)
+      case S.Lam(x, oty, body) =>
+        val (ety, vty) = oty match
+          case Some(ty) =>
+            val ety = checkType(ctx, ty, KType)
+            val vty = ctx.eval(ety)
+            (ety, vty)
+          case None =>
+            val ety = newMeta(ctx)
+            val vty = ctx.eval(ety)
+            (ety, vty)
+        val (ebody, rty) = insert(ctx, infer(ctx.bind(x, vty), body))
         (Lam(x, ety, ebody), VFun(vty, rty))
-      case S.Lam(_, None, _) => throw CannotInferError(tm.toString)
       case S.AppTy(fn, arg) =>
         val (efn, fnty) = infer(ctx, fn)
-        fnty match
+        force(fnty) match
           case VForall(x, ki, body) =>
             val earg = checkType(ctx, arg, ki)
             (AppTy(efn, earg), vinst(body, ctx.eval(earg)))
@@ -146,4 +171,4 @@ object Elaboration:
     val ctx = Ctx.empty(pos)
     val (etm, vty) = infer(ctx, tm)
     debug(s"elaboration done: $etm")
-    (etm, ctx.quote(vty))
+    (zonk(etm), zonkTy(ctx.quote(vty)))

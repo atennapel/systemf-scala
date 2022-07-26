@@ -20,3 +20,5 @@ object Common:
 
   def chooseName(x: Name, y: Name): Name =
     if y == "_" then x else y
+
+  type MetaId = Int

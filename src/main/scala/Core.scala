@@ -7,6 +7,7 @@ object Core:
 
   enum Ty:
     case TVar(ix: Ix)
+    case TMeta(id: MetaId)
     case TFun(left: Ty, right: Ty)
     case TApp(left: Ty, right: Ty)
     case TForall(name: Name, kind: Kind, body: Ty)

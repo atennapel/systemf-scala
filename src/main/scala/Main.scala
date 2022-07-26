@@ -5,7 +5,12 @@ import Surface.Ty.*
 import Surface.Kind.*
 
 object Main:
-  val test = LamTy("A", Some(KType), Lam("x", Some(TVar("A")), Var("x")))
+  val test = Let(
+    "id",
+    Some(TForall("A", Some(KType), TFun(TVar("A"), TVar("A")))),
+    Lam("x", None, Var("x")),
+    App(Var("id"), Var("id"))
+  )
 
   @main def run(): Unit =
     println(test.toString)

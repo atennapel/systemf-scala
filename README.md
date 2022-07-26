@@ -12,3 +12,12 @@ Based on https://github.com/AndrasKovacs/elaboration-zoo .
 - First-class polymorphism (aka impredicative instantiation)
 - Type aliases
 - Algebraic datatypes
+
+## TODO
+
+- [ ] Parsing
+- [ ] Pretty printing
+- [ ] Top-level generalization
+- [ ] Typecheck file
+- [ ] Definitions
+- [ ] Kind metas
