@@ -50,6 +50,7 @@ object Elaboration:
     ki match
       case SKind.KType      => KType
       case SKind.KFun(l, r) => KFun(checkKind(l), checkKind(r))
+      case SKind.KMeta(_)   => throw Impossible
 
   private def inferType(ctx0: Ctx, ty: STy): (Ty, Kind) =
     val ctx = ctx0.enter(ty.pos)
@@ -76,7 +77,7 @@ object Elaboration:
         (TForall(x, eki, ebody), KType)
 
   private def checkType(ctx: Ctx, ty: STy, ki: Kind): Ty =
-    debug(s"checkType: $ty : $ki")
+    debug(s"checkType: $ty : ${ctx.pretty(ki)}")
     val (ety, ki2) = inferType(ctx, ty)
     unifyKindCatch(ki2, ki)
     ety
@@ -97,13 +98,13 @@ object Elaboration:
         (evalue, ety, vty)
 
   private def coe(ctx: Ctx, tm: Tm, ty1: VTy, ty2: VTy): Tm =
-    debug(s"coe: $tm : ${ctx.quote(ty1)} ~> ${ctx.quote(ty2)}")
+    debug(s"coe: $tm : ${ctx.pretty(ty1)} ~> ${ctx.pretty(ty2)}")
     unify(ctx.lvl, ty1, ty2)
     tm
 
   private def check(ctx0: Ctx, tm: STm, ty: VTy): Tm =
     val ctx = ctx0.enter(tm.pos)
-    debug(s"check: $tm : ${ctx.quote(ty)}")
+    debug(s"check: $tm : ${ctx.pretty(ty)}")
     (tm, force(ty)) match
       case (S.Lam(x, oty, body), VFun(pty, rty)) =>
         oty.foreach { ty =>
@@ -223,7 +224,7 @@ object Elaboration:
     resetMetas()
     val ctx = Ctx.empty(pos)
     val (ztm, zty) = generalize(ctx, infer(ctx, tm))
-    debug(s"elaboration done: $ztm : $zty")
+    debug(s"elaboration done: ${ctx.pretty(ztm)} : ${ctx.pretty(zty)}")
     val utms = unsolvedTMetas()
     val ukms = unsolvedKMetas()
     if utms.nonEmpty || ukms.nonEmpty then
@@ -236,6 +237,7 @@ object Elaboration:
           s"in kinds: ${ukms.map(i => s"?$i").mkString(", ")}"
         else ""
       throw UnsolvedMetasError(
-        s"$t${if t.nonEmpty && k.nonEmpty then "; " else ""}$k\n$ztm : $zty"
+        s"$t${if t.nonEmpty && k.nonEmpty then "; " else ""}$k\n${ctx
+            .pretty(ztm)} : ${ctx.pretty(zty)}"
       )
     (ztm, zty)

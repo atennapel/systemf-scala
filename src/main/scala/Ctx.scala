@@ -2,6 +2,7 @@ import Common.*
 import Value.*
 import Core.*
 import Evaluation.{eval as veval, quote as vquote}
+import Pretty.{pretty as prTm, prettyTy as prTy, prettyKind as prKind}
 
 import scala.annotation.tailrec
 import scala.util.parsing.input.{Position, NoPosition}
@@ -14,6 +15,7 @@ final case class Ctx(
     val pos: Position
 ):
   def names: List[Name] = types.map(_._1)
+  def namesTy: List[Name] = kinds.map(_._1)
 
   def enter(pos: Position): Ctx = copy(pos = pos)
 
@@ -31,6 +33,11 @@ final case class Ctx(
 
   def eval(ty: Ty): VTy = veval(env, ty)
   def quote(v: VTy): Ty = vquote(lvl, v)
+
+  def pretty(tm: Tm): String = prTm(tm, names, namesTy)
+  def pretty(ty: Ty): String = prTy(ty, namesTy)
+  def pretty(ki: Kind): String = prKind(ki)
+  def pretty(v: VTy): String = prTy(quote(v), namesTy)
 
   def lookup(name: Name): Option[(Ix, VTy)] =
     @tailrec
