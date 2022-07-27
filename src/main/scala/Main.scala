@@ -3,16 +3,13 @@ import Surface.*
 import Surface.Tm.*
 import Surface.Ty.*
 import Surface.Kind.*
+import Debug.*
 
 object Main:
-  val test = Let(
-    "id",
-    Some(TForall("A", Some(KType), TFun(TVar("A"), TVar("A")))),
-    Lam("x", None, Var("x")),
-    App(Var("id"), Var("id"))
-  )
+  val test = Lam("x", None, Lam("y", None, Var("x")))
 
   @main def run(): Unit =
+    setDebug(false)
     println(test.toString)
     val (tm, ty) = elaborate(test)
     println(tm.toString)

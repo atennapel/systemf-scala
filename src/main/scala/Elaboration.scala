@@ -14,6 +14,7 @@ import Evaluation.*
 import Unification.*
 import Errors.*
 import Metas.*
+import Metas.TMetaEntry.*
 import Zonking.*
 import Debug.debug
 
@@ -21,13 +22,16 @@ import scala.util.parsing.input.{Position, NoPosition}
 import scala.annotation.tailrec
 
 object Elaboration:
-  private def newMeta(ctx: Ctx): Ty = TMeta(freshTMeta(ctx.lvl))
+  private def newMeta(ctx: Ctx, kind: Kind): Ty = TMeta(
+    freshTMeta(ctx.lvl, kind)
+  )
+  private def newKMeta(): Kind = KMeta(freshKMeta())
 
   private def insertForall(ctx: Ctx, inp: (Tm, VTy)): (Tm, VTy) =
     val (tm, ty) = inp
     force(ty) match
       case VForall(x, a, b) =>
-        val m = newMeta(ctx)
+        val m = newMeta(ctx, a)
         val mv = ctx.eval(m)
         insertForall(ctx, (AppTy(tm, m), vinst(b, mv)))
       case _ => (tm, ty)
@@ -49,6 +53,7 @@ object Elaboration:
 
   private def inferType(ctx0: Ctx, ty: STy): (Ty, Kind) =
     val ctx = ctx0.enter(ty.pos)
+    debug(s"inferType: $ty")
     ty match
       case STy.TVar(x) =>
         ctx.lookupTy(x) match
@@ -65,13 +70,13 @@ object Elaboration:
             val earg = checkType(ctx, arg, pki)
             (TApp(efn, earg), rki)
           case _ => throw NotAKFunError(ty.toString)
-      case STy.TForall(x, Some(ki), body) =>
-        val eki = checkKind(ki)
+      case STy.TForall(x, oki, body) =>
+        val eki = oki.map(checkKind(_)).getOrElse(newKMeta())
         val ebody = checkType(ctx.bindTy(x, eki), body, KType)
         (TForall(x, eki, ebody), KType)
-      case STy.TForall(_, None, _) => throw CannotInferError(ty.toString)
 
   private def checkType(ctx: Ctx, ty: STy, ki: Kind): Ty =
+    debug(s"checkType: $ty : $ki")
     val (ety, ki2) = inferType(ctx, ty)
     unifyKindCatch(ki2, ki)
     ety
@@ -92,11 +97,13 @@ object Elaboration:
         (evalue, ety, vty)
 
   private def coe(ctx: Ctx, tm: Tm, ty1: VTy, ty2: VTy): Tm =
+    debug(s"coe: $tm : ${ctx.quote(ty1)} ~> ${ctx.quote(ty2)}")
     unify(ctx.lvl, ty1, ty2)
     tm
 
   private def check(ctx0: Ctx, tm: STm, ty: VTy): Tm =
     val ctx = ctx0.enter(tm.pos)
+    debug(s"check: $tm : ${ctx.quote(ty)}")
     (tm, force(ty)) match
       case (S.Lam(x, oty, body), VFun(pty, rty)) =>
         oty.foreach { ty =>
@@ -125,6 +132,7 @@ object Elaboration:
         coe(ctx, etm, tyActual, ty)
 
   private def infer(ctx0: Ctx, tm: STm): (Tm, VTy) =
+    debug(s"infer: $tm")
     val ctx = ctx0.enter(tm.pos)
     tm match
       case S.Var(name) =>
@@ -149,7 +157,7 @@ object Elaboration:
             val vty = ctx.eval(ety)
             (ety, vty)
           case None =>
-            val ety = newMeta(ctx)
+            val ety = newMeta(ctx, KType)
             val vty = ctx.eval(ety)
             (ety, vty)
         val (ebody, rty) = insert(ctx, infer(ctx.bind(x, vty), body))
@@ -161,14 +169,73 @@ object Elaboration:
             val earg = checkType(ctx, arg, ki)
             (AppTy(efn, earg), vinst(body, ctx.eval(earg)))
           case _ => throw NotAForallError(tm.toString)
-      case S.LamTy(x, Some(ski), body) =>
-        val ki = checkKind(ski)
+      case S.LamTy(x, oski, body) =>
+        val ki = oski.map(checkKind(_)).getOrElse(newKMeta())
         val (ebody, rty) = infer(ctx.bindTy(x, ki), body)
         (LamTy(x, ki, ebody), VForall(x, ki, ctx.closeVal(rty)))
-      case S.LamTy(_, None, _) => throw CannotInferError(tm.toString)
+
+  private def unsolvedMetasInType(
+      ty: Ty,
+      k: Lvl = 0,
+      ms: List[(MetaId, Lvl)] = Nil
+  ): List[(MetaId, Lvl)] =
+    ty match
+      case TVar(_) => ms
+      case TFun(l, r) =>
+        unsolvedMetasInType(r, k, unsolvedMetasInType(l, k, ms))
+      case TApp(l, r) =>
+        unsolvedMetasInType(r, k, unsolvedMetasInType(l, k, ms))
+      case TForall(_, _, b) => unsolvedMetasInType(b, k + 1, ms)
+      case TMeta(id) if !ms.exists { case (id2, _) => id == id2 } =>
+        ms ++ List((id, k))
+      case TMeta(_) => ms
+
+  private def generalizeMetas(
+      ms: List[(MetaId, Lvl)],
+      total: Int,
+      ix: Int = 0
+  ): List[Kind] =
+    ms match
+      case Nil => Nil
+      case (id, k) :: ms =>
+        val ki = getTMetaUnsolved(id).kind
+        solveTMeta(id, VVar(ix), TVar(k + (total - ix - 1)))
+        ki :: generalizeMetas(ms, total, ix + 1)
+
+  private def generalizeTy(ks: List[Kind], ty: Ty, i: Int = 0): Ty = ks match
+    case Nil     => ty
+    case k :: ks => TForall(s"t$i", k, generalizeTy(ks, ty, i + 1))
+
+  private def generalizeTm(ks: List[Kind], tm: Tm, i: Int = 0): Tm = ks match
+    case Nil     => tm
+    case k :: ks => LamTy(s"t$i", k, generalizeTm(ks, tm, i + 1))
+
+  private def generalize(ctx: Ctx, inp: (Tm, VTy)): (Tm, Ty) =
+    val (etm, vty) = inp
+    val qty = zonkTy(ctx.quote(vty))
+    val ms = unsolvedMetasInType(qty)
+    val ks = generalizeMetas(ms, ms.size)
+    val zty = zonkTy(generalizeTy(ks, qty))
+    val ztm = zonk(generalizeTm(ks, etm))
+    (ztm, zty)
 
   def elaborate(tm: STm, pos: Position = NoPosition): (Tm, Ty) =
+    resetMetas()
     val ctx = Ctx.empty(pos)
-    val (etm, vty) = infer(ctx, tm)
-    debug(s"elaboration done: $etm")
-    (zonk(etm), zonkTy(ctx.quote(vty)))
+    val (ztm, zty) = generalize(ctx, infer(ctx, tm))
+    debug(s"elaboration done: $ztm : $zty")
+    val utms = unsolvedTMetas()
+    val ukms = unsolvedKMetas()
+    if utms.nonEmpty || ukms.nonEmpty then
+      val t =
+        if utms.nonEmpty then
+          s"in types: ${utms.map(i => s"?$i").mkString(", ")}"
+        else ""
+      val k =
+        if ukms.nonEmpty then
+          s"in kinds: ${ukms.map(i => s"?$i").mkString(", ")}"
+        else ""
+      throw UnsolvedMetasError(
+        s"$t${if t.nonEmpty && k.nonEmpty then "; " else ""}$k\n$ztm : $zty"
+      )
+    (ztm, zty)

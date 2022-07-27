@@ -14,3 +14,5 @@ object Errors:
       extends Exception(s"expected kind function: $msg")
   final case class KindMismatchError(msg: String)
       extends Exception(s"kind mismatch: $msg")
+  final case class UnsolvedMetasError(msg: String)
+      extends Exception(s"unsolved metas: $msg")
