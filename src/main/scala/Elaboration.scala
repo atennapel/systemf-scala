@@ -3,6 +3,9 @@ import Surface.Tm as S
 import Surface.Tm as STm
 import Surface.Ty as STy
 import Surface.Kind as SKind
+import Surface.Decl
+import Surface.Decl.*
+import Surface.Decls
 import Core.*
 import Core.Tm.*
 import Core.Ty.*
@@ -17,6 +20,7 @@ import Metas.*
 import Metas.TMetaEntry.*
 import Zonking.*
 import Debug.debug
+import Globals.*
 
 import scala.util.parsing.input.{Position, NoPosition}
 import scala.annotation.tailrec
@@ -139,7 +143,10 @@ object Elaboration:
       case S.Var(name) =>
         ctx.lookup(name) match
           case Some((ix, ty)) => (Var(ix), ty)
-          case None           => throw VarError(s"$name\n${ctx.pos.longString}")
+          case None =>
+            getGlobal(name) match
+              case Some(e) => (Global(name), e.vty)
+              case None    => throw VarError(s"$name\n${ctx.pos.longString}")
       case S.Let(x, oty, value, body) =>
         val (evalue, ety, vty) = checkOptionalType(ctx, oty, value)
         val (ebody, rty) = infer(ctx.bind(x, vty), body)
@@ -220,11 +227,7 @@ object Elaboration:
     val ztm = zonk(generalizeTm(ks, etm))
     (ztm, zty)
 
-  def elaborate(tm: STm, pos: Position = NoPosition): (Tm, Ty) =
-    resetMetas()
-    val ctx = Ctx.empty(pos)
-    val (ztm, zty) = generalize(ctx, infer(ctx, tm))
-    debug(s"elaboration done: ${ctx.pretty(ztm)} : ${ctx.pretty(zty)}")
+  private def checkMetasSolved(ctx: Ctx, tm: Tm, ty: Ty): Unit =
     val utms = unsolvedTMetas()
     val ukms = unsolvedKMetas()
     if utms.nonEmpty || ukms.nonEmpty then
@@ -238,6 +241,36 @@ object Elaboration:
         else ""
       throw UnsolvedMetasError(
         s"$t${if t.nonEmpty && k.nonEmpty then "; " else ""}$k\n${ctx
-            .pretty(ztm)} : ${ctx.pretty(zty)}"
+            .pretty(tm)} : ${ctx.pretty(ty)}"
       )
+
+  def elaborate(tm: STm, ty: STy): (Tm, Ty) =
+    resetMetas()
+    val ctx = Ctx.empty(tm.pos)
+    val vty = ctx.eval(checkType(ctx, ty, KType))
+    val etm = check(ctx, tm, vty)
+    val (ztm, zty) = generalize(ctx, (etm, vty))
+    debug(s"elaboration done: ${ctx.pretty(ztm)} : ${ctx.pretty(zty)}")
+    checkMetasSolved(ctx, ztm, zty)
     (ztm, zty)
+
+  def elaborate(tm: STm): (Tm, Ty) =
+    resetMetas()
+    val ctx = Ctx.empty(tm.pos)
+    val (ztm, zty) = generalize(ctx, infer(ctx, tm))
+    debug(s"elaboration done: ${ctx.pretty(ztm)} : ${ctx.pretty(zty)}")
+    checkMetasSolved(ctx, ztm, zty)
+    (ztm, zty)
+
+  private def pregeneralize(ty: STy): STy =
+    ty.free.foldRight(ty)((x, t) => STy.TForall(x, None, t))
+
+  def elaborateDecl(d: Decl): Unit = d match
+    case DDef(x, t, v) =>
+      debug(s"elaborating def $x")
+      val (tm, ty) = t.map(pregeneralize).fold(elaborate(v))(elaborate(v, _))
+      debug(s"elaborated def $x: ${Ctx.pretty(tm)} : ${Ctx.pretty(ty)}")
+      addGlobal(GlobalEntry(x, ty, eval(Nil, ty), tm))
+
+  def elaborateDecls(ds: Decls): Unit =
+    ds.decls.foreach(elaborateDecl)

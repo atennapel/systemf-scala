@@ -27,6 +27,7 @@ object Core:
 
   enum Tm:
     case Var(ix: Ix)
+    case Global(name: Name)
     case Let(name: Name, ty: Ty, value: Tm, body: Tm)
     case App(fn: Tm, arg: Tm)
     case Lam(name: Name, ty: Ty, body: Tm)
@@ -35,6 +36,7 @@ object Core:
 
     override def toString: String = this match
       case Var(ix)         => s"'$ix"
+      case Global(x)       => s"$x"
       case Let(x, t, v, b) => s"(let $x : $t = $v; $b)"
       case App(l, r)       => s"($l $r)"
       case Lam(x, t, b)    => s"(\\($x : $t). $b)"

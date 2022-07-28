@@ -5,7 +5,7 @@ import scala.util.parsing.input.Positional
 object Surface:
   enum Kind extends Positional:
     case KType
-    case KMeta(id: MetaId)
+    case KMeta(id: MetaId) // only used for pretty printing
     case KFun(left: Kind, right: Kind)
 
     override def toString: String = this match
@@ -28,6 +28,14 @@ object Surface:
     case TFun(left: Ty, right: Ty)
     case TApp(left: Ty, right: Ty)
     case TForall(name: Name, kind: Option[Kind], body: Ty)
+
+    def free: List[Name] =
+      def go(t: Ty): List[Name] = t match
+        case TVar(x)          => List(x)
+        case TFun(l, r)       => go(l) ++ go(r)
+        case TApp(l, r)       => go(l) ++ go(r)
+        case TForall(x, _, b) => go(b).filterNot(_ == x)
+      go(this).distinct
 
     override def toString: String = this match
       case TVar(x)         => s"$x"
@@ -126,3 +134,13 @@ object Surface:
           val (xs, b2) = b.flattenLam
           ((x, Left(k)) :: xs, b2)
         case tm => (Nil, tm)
+
+  enum Decl extends Positional:
+    case DDef(name: Name, ty: Option[Ty], value: Tm)
+
+    override def toString: String = this match
+      case DDef(x, None, v)     => s"def $x = $v"
+      case DDef(x, Some(ty), v) => s"def $x : $ty = $v"
+
+  final case class Decls(decls: List[Decl]):
+    override def toString: String = decls.mkString("; ")

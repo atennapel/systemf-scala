@@ -27,7 +27,8 @@ object Zonking:
     case TForall(x, kind, body) => TForall(x, zonkKind(kind), zonkTy(body))
 
   def zonk(t: Tm): Tm = t match
-    case Var(ix)                 => Var(ix)
+    case Var(ix)                 => t
+    case Global(x)               => t
     case Let(x, ty, value, body) => Let(x, zonkTy(ty), zonk(value), zonk(body))
     case App(fn, arg)            => App(zonk(fn), zonk(arg))
     case Lam(x, ty, body)        => Lam(x, zonkTy(ty), zonk(body))

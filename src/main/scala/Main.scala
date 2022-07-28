@@ -3,20 +3,19 @@ import Surface.*
 import Surface.Tm.*
 import Surface.Ty.*
 import Surface.Kind.*
+import Surface.Decl.*
 import Debug.*
 import Pretty.*
 
 object Main:
-  val test = Let(
-    "id",
-    Some(TForall("A", Some(KType), TFun(TVar("A"), TVar("A")))),
-    Lam("x", None, Var("x")),
-    App(Var("id"), Var("id"))
+  val ds = Decls(
+    List(
+      DDef("id", Some(TFun(TVar("t"), TVar("t"))), Lam("x", None, Var("x"))),
+      DDef("x", None, Var("id"))
+    )
   )
 
   @main def run(): Unit =
-    setDebug(false)
-    println(test.toString)
-    val (tm, ty) = elaborate(test)
-    println(pretty(tm))
-    println(prettyTy(ty))
+    setDebug(true)
+    println(ds.toString)
+    elaborateDecls(ds)

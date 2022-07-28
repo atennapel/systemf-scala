@@ -59,3 +59,8 @@ final case class Ctx(
 object Ctx:
   def empty(pos: Position = NoPosition): Ctx =
     Ctx(Nil, 0, Nil, Nil, pos)
+
+  def pretty(x: Tm): String = empty().pretty(x)
+  def pretty(x: Ty): String = empty().pretty(x)
+  def pretty(x: Kind): String = empty().pretty(x)
+  def pretty(x: VTy): String = empty().pretty(x)

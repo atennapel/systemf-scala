@@ -22,6 +22,7 @@ object Pretty:
 
   private def tmS(tm: CTm, ns: List[Name], ts: List[Name]): Tm = tm match
     case CTm.Var(ix)     => Var(ns(ix))
+    case CTm.Global(x)   => Var(x)
     case CTm.App(l, r)   => App(tmS(l, ns, ts), tmS(r, ns, ts))
     case CTm.AppTy(l, r) => AppTy(tmS(l, ns, ts), tyS(r, ts))
     case CTm.Let(x0, t, v, b) =>

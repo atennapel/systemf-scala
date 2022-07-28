@@ -18,6 +18,8 @@ Based on https://github.com/AndrasKovacs/elaboration-zoo .
 - [x] Kind metas
 - [x] Top-level generalization
 - [x] Pretty printing
+- [x] Definitions
 - [ ] Parsing
 - [ ] Typecheck file
-- [ ] Definitions
+- [ ] Type aliases
+- [ ] Mutual recursion
