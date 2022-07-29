@@ -1,6 +1,9 @@
 import scala.annotation.tailrec
 
 object Common:
+  final case class Pos(line: Int, col: Int):
+    override def toString: String = s"L$line:$col"
+
   type Ix = Int
   type Lvl = Int
   def lvl2ix(l: Lvl, x: Lvl): Ix = l - x - 1

@@ -5,19 +5,18 @@ import Evaluation.{eval as veval, quote as vquote}
 import Pretty.{pretty as prTm, prettyTy as prTy, prettyKind as prKind}
 
 import scala.annotation.tailrec
-import scala.util.parsing.input.{Position, NoPosition}
 
 final case class Ctx(
     val env: Env,
     val lvl: Lvl,
     val types: List[(Name, VTy)],
     val kinds: List[(Name, Boolean, Kind)],
-    val pos: Position
+    val pos: Pos
 ):
   def names: List[Name] = types.map(_._1)
   def namesTy: List[Name] = kinds.map(_._1)
 
-  def enter(pos: Position): Ctx = copy(pos = pos)
+  def enter(pos: Pos): Ctx = copy(pos = pos)
 
   def bind(x: Name, ty: VTy): Ctx = copy(types = (x, ty) :: types)
 
@@ -57,10 +56,10 @@ final case class Ctx(
     go(kinds, 0)
 
 object Ctx:
-  def empty(pos: Position = NoPosition): Ctx =
+  def empty(pos: Pos): Ctx =
     Ctx(Nil, 0, Nil, Nil, pos)
 
-  def pretty(x: Tm): String = empty().pretty(x)
-  def pretty(x: Ty): String = empty().pretty(x)
-  def pretty(x: Kind): String = empty().pretty(x)
-  def pretty(x: VTy): String = empty().pretty(x)
+  def pretty(x: Tm): String = prTm(x)
+  def pretty(x: Ty): String = prTy(x)
+  def pretty(x: Kind): String = prKind(x)
+  def pretty(x: VTy): String = prTy(vquote(0, x))

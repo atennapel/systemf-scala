@@ -22,7 +22,6 @@ import Zonking.*
 import Debug.debug
 import Globals.*
 
-import scala.util.parsing.input.{Position, NoPosition}
 import scala.annotation.tailrec
 
 object Elaboration:
@@ -53,17 +52,21 @@ object Elaboration:
   private def checkKind(ki: SKind): Kind =
     ki match
       case SKind.KType      => KType
+      case SKind.KHole      => newKMeta()
       case SKind.KFun(l, r) => KFun(checkKind(l), checkKind(r))
       case SKind.KMeta(_)   => throw Impossible
 
-  private def inferType(ctx0: Ctx, ty: STy): (Ty, Kind) =
-    val ctx = ctx0.enter(ty.pos)
+  private def inferType(ctx: Ctx, ty: STy): (Ty, Kind) =
     debug(s"inferType: $ty")
     ty match
       case STy.TVar(x) =>
         ctx.lookupTy(x) match
           case Some((i, ki)) => (TVar(i), ki)
-          case None => throw VarError(s"tvar $x\n${ctx.pos.longString}")
+          case None          => throw VarError(s"tvar $x\n${ctx.pos}")
+      case STy.THole =>
+        val k = newKMeta()
+        val m = newMeta(ctx, k)
+        (m, k)
       case STy.TFun(l, r) =>
         val el = checkType(ctx, l, KType)
         val er = checkType(ctx, r, KType)
@@ -106,10 +109,10 @@ object Elaboration:
     unify(ctx.lvl, ty1, ty2)
     tm
 
-  private def check(ctx0: Ctx, tm: STm, ty: VTy): Tm =
-    val ctx = ctx0.enter(tm.pos)
+  private def check(ctx: Ctx, tm: STm, ty: VTy): Tm =
     debug(s"check: $tm : ${ctx.pretty(ty)}")
     (tm, force(ty)) match
+      case (S.Hole, _) => throw HoleError(ctx.pretty(ty))
       case (S.Lam(x, oty, body), VFun(pty, rty)) =>
         oty.foreach { ty =>
           val ety = checkType(ctx, ty, KType)
@@ -136,17 +139,17 @@ object Elaboration:
         val (etm, tyActual) = insert(ctx, infer(ctx, tm))
         coe(ctx, etm, tyActual, ty)
 
-  private def infer(ctx0: Ctx, tm: STm): (Tm, VTy) =
+  private def infer(ctx: Ctx, tm: STm): (Tm, VTy) =
     debug(s"infer: $tm")
-    val ctx = ctx0.enter(tm.pos)
     tm match
+      case S.Hole => throw CannotInferError(tm.toString)
       case S.Var(name) =>
         ctx.lookup(name) match
           case Some((ix, ty)) => (Var(ix), ty)
           case None =>
             getGlobal(name) match
               case Some(e) => (Global(name), e.vty)
-              case None    => throw VarError(s"$name\n${ctx.pos.longString}")
+              case None    => throw VarError(s"$name\n${ctx.pos}")
       case S.Let(x, oty, value, body) =>
         val (evalue, ety, vty) = checkOptionalType(ctx, oty, value)
         val (ebody, rty) = infer(ctx.bind(x, vty), body)
@@ -244,9 +247,9 @@ object Elaboration:
             .pretty(tm)} : ${ctx.pretty(ty)}"
       )
 
-  def elaborate(tm: STm, ty: STy): (Tm, Ty) =
+  def elaborate(tm: STm, ty: STy, pos: Pos): (Tm, Ty) =
     resetMetas()
-    val ctx = Ctx.empty(tm.pos)
+    val ctx = Ctx.empty(pos)
     val vty = ctx.eval(checkType(ctx, ty, KType))
     val etm = check(ctx, tm, vty)
     val (ztm, zty) = generalize(ctx, (etm, vty))
@@ -254,9 +257,9 @@ object Elaboration:
     checkMetasSolved(ctx, ztm, zty)
     (ztm, zty)
 
-  def elaborate(tm: STm): (Tm, Ty) =
+  def elaborate(tm: STm, pos: Pos): (Tm, Ty) =
     resetMetas()
-    val ctx = Ctx.empty(tm.pos)
+    val ctx = Ctx.empty(pos)
     val (ztm, zty) = generalize(ctx, infer(ctx, tm))
     debug(s"elaboration done: ${ctx.pretty(ztm)} : ${ctx.pretty(zty)}")
     checkMetasSolved(ctx, ztm, zty)
@@ -265,12 +268,13 @@ object Elaboration:
   private def pregeneralize(ty: STy): STy =
     ty.free.foldRight(ty)((x, t) => STy.TForall(x, None, t))
 
-  def elaborateDecl(d: Decl): Unit = d match
+  def elaborateDecl(d: Decl, pos: Pos): Unit = d match
     case DDef(x, t, v) =>
       debug(s"elaborating def $x")
-      val (tm, ty) = t.map(pregeneralize).fold(elaborate(v))(elaborate(v, _))
+      val (tm, ty) =
+        t.map(pregeneralize).fold(elaborate(v, pos))(elaborate(v, _, pos))
       debug(s"elaborated def $x: ${Ctx.pretty(tm)} : ${Ctx.pretty(ty)}")
       addGlobal(GlobalEntry(x, ty, eval(Nil, ty), tm))
 
-  def elaborateDecls(ds: Decls): Unit =
-    ds.decls.foreach(elaborateDecl)
+  def elaborateDecls(ds: Decls, pos: Pos): Unit =
+    ds.decls.foreach(elaborateDecl(_, pos))

@@ -1,15 +1,15 @@
 import Common.*
 
-import scala.util.parsing.input.Positional
-
 object Surface:
-  enum Kind extends Positional:
+  enum Kind:
     case KType
+    case KHole
     case KMeta(id: MetaId) // only used for pretty printing
     case KFun(left: Kind, right: Kind)
 
     override def toString: String = this match
       case KType     => "Type"
+      case KHole     => "_"
       case KMeta(id) => s"?$id"
       case k @ KFun(_, _) =>
         k.flattenKFun
@@ -23,8 +23,9 @@ object Surface:
       case KFun(l, r) => List(l) ++ r.flattenKFun
       case k          => List(k)
 
-  enum Ty extends Positional:
+  enum Ty:
     case TVar(name: Name)
+    case THole
     case TFun(left: Ty, right: Ty)
     case TApp(left: Ty, right: Ty)
     case TForall(name: Name, kind: Option[Kind], body: Ty)
@@ -32,6 +33,7 @@ object Surface:
     def free: List[Name] =
       def go(t: Ty): List[Name] = t match
         case TVar(x)          => List(x)
+        case THole            => Nil
         case TFun(l, r)       => go(l) ++ go(r)
         case TApp(l, r)       => go(l) ++ go(r)
         case TForall(x, _, b) => go(b).filterNot(_ == x)
@@ -39,6 +41,7 @@ object Surface:
 
     override def toString: String = this match
       case TVar(x)         => s"$x"
+      case THole           => s"_"
       case ty @ TFun(_, _) => ty.flattenTFun.map(_.showS()).mkString(" -> ")
       case ty @ TApp(_, _) => ty.flattenTApp.map(_.showS(false)).mkString(" ")
       case ty @ TForall(_, _, _) =>
@@ -51,6 +54,7 @@ object Surface:
 
     protected def isSimple(appIsSimple: Boolean = true): Boolean = this match
       case TVar(_)    => true
+      case THole      => true
       case TApp(_, _) => appIsSimple
       case _          => false
 
@@ -71,8 +75,9 @@ object Surface:
         ((x, k) :: xs, ty)
       case ty => (Nil, ty)
 
-  enum Tm extends Positional:
+  enum Tm:
     case Var(name: Name)
+    case Hole
     case Let(name: Name, ty: Option[Ty], value: Tm, body: Tm)
     case App(fn: Tm, arg: Tm)
     case Lam(name: Name, ty: Option[Ty], body: Tm)
@@ -81,6 +86,7 @@ object Surface:
 
     override def toString: String = this match
       case Var(x)                => s"$x"
+      case Hole                  => "_"
       case Let(x, Some(t), v, b) => s"let $x : $t = $v; $b"
       case Let(x, None, v, b)    => s"let $x = $v; $b"
       case tm @ App(_, _) =>
@@ -108,6 +114,7 @@ object Surface:
 
     protected def isSimple(appIsSimple: Boolean = true): Boolean = this match
       case Var(_)      => true
+      case Hole        => true
       case App(_, _)   => appIsSimple
       case AppTy(_, _) => appIsSimple
       case _           => false
@@ -135,7 +142,7 @@ object Surface:
           ((x, Left(k)) :: xs, b2)
         case tm => (Nil, tm)
 
-  enum Decl extends Positional:
+  enum Decl:
     case DDef(name: Name, ty: Option[Ty], value: Tm)
 
     override def toString: String = this match

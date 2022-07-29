@@ -19,7 +19,8 @@ Based on https://github.com/AndrasKovacs/elaboration-zoo .
 - [x] Top-level generalization
 - [x] Pretty printing
 - [x] Definitions
-- [ ] Parsing
+- [x] Parsing
 - [ ] Typecheck file
 - [ ] Type aliases
 - [ ] Mutual recursion
+- [ ] Imports

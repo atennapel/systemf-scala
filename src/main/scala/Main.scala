@@ -6,16 +6,17 @@ import Surface.Kind.*
 import Surface.Decl.*
 import Debug.*
 import Pretty.*
+import Common.*
+import Globals.*
+import Parser.DeclsParser.parser
 
-object Main:
-  val ds = Decls(
-    List(
-      DDef("id", Some(TFun(TVar("t"), TVar("t"))), Lam("x", None, Var("x"))),
-      DDef("x", None, Var("id"))
-    )
-  )
+import java.io.File
+import parsley.io.given
 
-  @main def run(): Unit =
-    setDebug(true)
-    println(ds.toString)
-    elaborateDecls(ds)
+@main def cli(filename: String): Unit =
+  val tm = parser.parseFromFile(new File(filename)).flatMap(_.toTry).get
+  debug(tm.toString)
+  elaborateDecls(tm, Pos(0, 0))
+  getGlobals().foreach { (x, e) =>
+    println(s"$x : ${Ctx.pretty(e.ty)} = ${Ctx.pretty(e.value)}")
+  }

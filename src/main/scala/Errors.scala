@@ -16,3 +16,4 @@ object Errors:
       extends Exception(s"kind mismatch: $msg")
   final case class UnsolvedMetasError(msg: String)
       extends Exception(s"unsolved metas: $msg")
+  final case class HoleError(msg: String) extends Exception(s"hole error: $msg")
