@@ -144,10 +144,27 @@ object Surface:
 
   enum Decl:
     case DDef(name: Name, ty: Option[Ty], value: Tm)
+    case DType(
+        name: Name,
+        params: List[(Name, Option[Kind])],
+        kind: Option[Kind],
+        value: Ty
+    )
 
     override def toString: String = this match
-      case DDef(x, None, v)     => s"def $x = $v"
-      case DDef(x, Some(ty), v) => s"def $x : $ty = $v"
+      case DDef(x, None, v)     => s"$x = $v"
+      case DDef(x, Some(ty), v) => s"$x : $ty = $v"
+      case DType(x, ps, None, v) =>
+        s"type $x ${showParams(ps)}${if ps.isEmpty then "" else " "}= $v"
+      case DType(x, ps, Some(ki), v) =>
+        s"type $x ${showParams(ps)}${if ps.isEmpty then "" else " "}: $ki = $v"
+
+    private def showParams(ps: List[(Name, Option[Kind])]): String =
+      ps.map(showParam).mkString(" ")
+
+    private def showParam(p: (Name, Option[Kind])): String = p match
+      case (x, None)    => s"$x"
+      case (x, Some(k)) => s"($x : $k)"
 
   final case class Decls(decls: List[Decl]):
     override def toString: String = decls.mkString("; ")

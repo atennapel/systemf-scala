@@ -14,6 +14,12 @@ object Value:
 
   enum VTy:
     case VNe(head: Head, spine: Spine)
+    case VGlobal(
+        name: Name,
+        arity: Int,
+        spine: Spine,
+        value: Either[List[VTy] => VTy, () => VTy]
+    )
     case VFun(left: VTy, right: VTy)
     case VForall(name: Name, kind: Kind, body: Clos)
 

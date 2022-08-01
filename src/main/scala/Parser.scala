@@ -18,7 +18,7 @@ object Parser:
       commentLine = "--",
       commentStart = "{-",
       commentEnd = "-}",
-      keywords = Set("Type", "let", "forall", "def"),
+      keywords = Set("Type", "let", "forall", "def", "type"),
       operators = Set("=", ":", ";", "\\", ".", "->", "_"),
       identStart = Predicate(_.isLetter),
       identLetter = Predicate(_.isLetterOrDigit),
@@ -72,7 +72,7 @@ object Parser:
         }
       }
 
-    private lazy val param: Parsley[(List[Name], Option[Kind])] =
+    lazy val param: Parsley[(List[Name], Option[Kind])] =
       ("(" *> some(ident) <~> ":" *> KindParser.kind <* ")").map((xs, ki) =>
         (xs, Some(ki))
       )
@@ -98,7 +98,12 @@ object Parser:
       ("let" *> ident <~> many(param) <~> option(
         ":" *> TyParser.ty
       ) <~> "=" *> tm <~> ";" *> tm).map { case ((((x, ps), ty), v), b) =>
-        Let(x, ty.map(typeFromParams(ps, _)), lamFromParams(ps, v), b)
+        Let(
+          x,
+          ty.map(typeFromParams(ps, _)),
+          lamFromParams(ps, v, ty.isEmpty),
+          b
+        )
       }
 
     private type Param =
@@ -112,16 +117,17 @@ object Parser:
         )
       )
 
-    def lamFromParams(xs: List[Param], b: Tm): Tm =
+    def lamFromParams(xs: List[Param], b: Tm, useTypes: Boolean): Tm =
       xs.foldRight(b)((x, b) =>
         x.fold(
-          (xs, ki) => xs.foldRight(b)(LamTy(_, ki, _)),
-          (xs, ty) => xs.foldRight(b)(Lam(_, ty, _))
+          (xs, ki) =>
+            xs.foldRight(b)(LamTy(_, if useTypes then ki else None, _)),
+          (xs, ty) => xs.foldRight(b)(Lam(_, if useTypes then ty else None, _))
         )
       )
 
     private lazy val lam: Parsley[Tm] =
-      ("\\" *> many(param) <~> "." *> tm).map(lamFromParams)
+      ("\\" *> many(param) <~> "." *> tm).map(lamFromParams(_, _, true))
 
     lazy val param: Parsley[Param] =
       ("(" *> some(ident) <~> ":" *> TyParser.ty <* ")").map((xs, ty) =>
@@ -151,16 +157,29 @@ object Parser:
     import LangLexer.{fully, ident}
     import LangLexer.Implicits.given
 
-    private lazy val decl: Parsley[Decl] =
+    private lazy val ddef: Parsley[Decl] =
       (ident <~> many(TmParser.param) <~> option(
         ":" *> TyParser.ty
       ) <~> "=" *> TmParser.tm).map { case (((x, ps), ty), v) =>
         DDef(
           x,
           ty.map(TmParser.typeFromParams(ps, _)),
-          TmParser.lamFromParams(ps, v)
+          TmParser.lamFromParams(ps, v, ty.isEmpty)
         )
       }
+
+    private lazy val dtype: Parsley[Decl] =
+      ("type" *> ident <~> many(
+        TyParser.param
+      ) <~> option(
+        ":" *> KindParser.kind
+      ) <~> "=" *> TyParser.ty).map { case (((x, ps), ki), ty) =>
+        val psfl = ps.flatMap((xs, ki) => xs.map(x => (x, ki)))
+        DType(x, psfl, ki, ty)
+      }
+
+    private lazy val decl: Parsley[Decl] =
+      dtype <|> ddef
 
     private lazy val decls: Parsley[Decls] =
       sepEndBy(decl, ";").map(Decls.apply)

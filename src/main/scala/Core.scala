@@ -13,6 +13,7 @@ object Core:
 
   enum Ty:
     case TVar(ix: Ix)
+    case TGlobal(name: Name)
     case TMeta(id: MetaId)
     case TFun(left: Ty, right: Ty)
     case TApp(left: Ty, right: Ty)
@@ -20,6 +21,7 @@ object Core:
 
     override def toString: String = this match
       case TVar(ix)         => s"'$ix"
+      case TGlobal(x)       => s"$x"
       case TMeta(id)        => s"?$id"
       case TFun(l, r)       => s"($l -> $r)"
       case TApp(l, r)       => s"($l $r)"

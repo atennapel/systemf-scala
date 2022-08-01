@@ -49,11 +49,11 @@ object Elaboration:
     try unifyKind(k1, k2)
     catch case e: UnifyError => throw KindMismatchError(s"$k1 ~ $k2: $e")
 
-  private def checkKind(ki: SKind): Kind =
+  private def inferKind(ki: SKind): Kind =
     ki match
       case SKind.KType      => KType
       case SKind.KHole      => newKMeta()
-      case SKind.KFun(l, r) => KFun(checkKind(l), checkKind(r))
+      case SKind.KFun(l, r) => KFun(inferKind(l), inferKind(r))
       case SKind.KMeta(_)   => throw Impossible
 
   private def inferType(ctx: Ctx, ty: STy): (Ty, Kind) =
@@ -62,7 +62,10 @@ object Elaboration:
       case STy.TVar(x) =>
         ctx.lookupTy(x) match
           case Some((i, ki)) => (TVar(i), ki)
-          case None          => throw VarError(s"tvar $x\n${ctx.pos}")
+          case None =>
+            getTGlobal(x) match
+              case Some(e) => (TGlobal(x), e.fullkind)
+              case None    => throw VarError(s"tvar $x\n${ctx.pos}")
       case STy.THole =>
         val k = newKMeta()
         val m = newMeta(ctx, k)
@@ -79,7 +82,7 @@ object Elaboration:
             (TApp(efn, earg), rki)
           case _ => throw NotAKFunError(ty.toString)
       case STy.TForall(x, oki, body) =>
-        val eki = oki.map(checkKind(_)).getOrElse(newKMeta())
+        val eki = oki.map(inferKind(_)).getOrElse(newKMeta())
         val ebody = checkType(ctx.bindTy(x, eki), body, KType)
         (TForall(x, eki, ebody), KType)
 
@@ -122,7 +125,7 @@ object Elaboration:
         val ebody = check(ctx.bind(x, pty), body, rty)
         Lam(x, ctx.quote(pty), ebody)
       case (S.LamTy(x, oki, body), VForall(_, ki, rty)) =>
-        oki.foreach { ki2 => unifyKindCatch(checkKind(ki2), ki) }
+        oki.foreach { ki2 => unifyKindCatch(inferKind(ki2), ki) }
         val ebody = check(ctx.bindTy(x, ki), body, vinst(rty, VVar(ctx.lvl)))
         LamTy(x, ki, ebody)
       case (tm, VForall(x, ki, rty)) =>
@@ -181,7 +184,7 @@ object Elaboration:
             (AppTy(efn, earg), vinst(body, ctx.eval(earg)))
           case _ => throw NotAForallError(tm.toString)
       case S.LamTy(x, oski, body) =>
-        val ki = oski.map(checkKind(_)).getOrElse(newKMeta())
+        val ki = oski.map(inferKind(_)).getOrElse(newKMeta())
         val (ebody, rty) = infer(ctx.bindTy(x, ki), body)
         (LamTy(x, ki, ebody), VForall(x, ki, ctx.closeVal(rty)))
 
@@ -191,7 +194,8 @@ object Elaboration:
       ms: List[(MetaId, Lvl)] = Nil
   ): List[(MetaId, Lvl)] =
     ty match
-      case TVar(_) => ms
+      case TVar(_)    => ms
+      case TGlobal(_) => Nil
       case TFun(l, r) =>
         unsolvedMetasInType(r, k, unsolvedMetasInType(l, k, ms))
       case TApp(l, r) =>
@@ -223,14 +227,14 @@ object Elaboration:
 
   private def generalize(ctx: Ctx, inp: (Tm, VTy)): (Tm, Ty) =
     val (etm, vty) = inp
-    val qty = zonkTy(ctx.quote(vty))
+    val qty = zonk(ctx.quote(vty))
     val ms = unsolvedMetasInType(qty)
     val ks = generalizeMetas(ms, ms.size)
-    val zty = zonkTy(generalizeTy(ks, qty))
+    val zty = zonk(generalizeTy(ks, qty))
     val ztm = zonk(generalizeTm(ks, etm))
     (ztm, zty)
 
-  private def checkMetasSolved(ctx: Ctx, tm: Tm, ty: Ty): Unit =
+  private def checkMetasSolved(): Unit =
     val utms = unsolvedTMetas()
     val ukms = unsolvedKMetas()
     if utms.nonEmpty || ukms.nonEmpty then
@@ -243,38 +247,83 @@ object Elaboration:
           s"in kinds: ${ukms.map(i => s"?$i").mkString(", ")}"
         else ""
       throw UnsolvedMetasError(
-        s"$t${if t.nonEmpty && k.nonEmpty then "; " else ""}$k\n${ctx
-            .pretty(tm)} : ${ctx.pretty(ty)}"
+        s"$t${if t.nonEmpty && k.nonEmpty then "; " else ""}$k"
       )
 
   def elaborate(tm: STm, ty: STy, pos: Pos): (Tm, Ty) =
+    debug(s"elaborate $tm : $ty")
     resetMetas()
     val ctx = Ctx.empty(pos)
     val vty = ctx.eval(checkType(ctx, ty, KType))
     val etm = check(ctx, tm, vty)
     val (ztm, zty) = generalize(ctx, (etm, vty))
     debug(s"elaboration done: ${ctx.pretty(ztm)} : ${ctx.pretty(zty)}")
-    checkMetasSolved(ctx, ztm, zty)
+    checkMetasSolved()
     (ztm, zty)
 
   def elaborate(tm: STm, pos: Pos): (Tm, Ty) =
+    debug(s"elaborate $tm")
     resetMetas()
     val ctx = Ctx.empty(pos)
     val (ztm, zty) = generalize(ctx, infer(ctx, tm))
     debug(s"elaboration done: ${ctx.pretty(ztm)} : ${ctx.pretty(zty)}")
-    checkMetasSolved(ctx, ztm, zty)
+    checkMetasSolved()
     (ztm, zty)
 
-  private def pregeneralize(ty: STy): STy =
-    ty.free.foldRight(ty)((x, t) => STy.TForall(x, None, t))
+  private def elaborate(ty: STy, ctx: Ctx): (Ty, Kind) =
+    debug(s"elaborate $ty")
+    resetMetas()
+    val (ety, ki) = inferType(ctx, ty)
+    val zty = zonk(ety)
+    val zki = zonk(ki)
+    debug(s"type elaboration done: ${ctx.pretty(zty)} : ${ctx.pretty(zki)}")
+    (zty, zki)
+
+  private def elaborate(ty: STy, ski: SKind, ctx: Ctx): (Ty, Kind) =
+    debug(s"elaborate $ty : $ski")
+    resetMetas()
+    val eki = inferKind(ski)
+    val ety = checkType(ctx, ty, eki)
+    val zty = zonk(ety)
+    val zki = zonk(eki)
+    debug(s"type elaboration done: ${ctx.pretty(zty)} : ${ctx.pretty(zki)}")
+    (zty, zki)
+
+  private def pregeneralize(ty: STy, except: List[Name] = Nil): STy =
+    ty.free
+      .filter(x => x.head.isLower && !except.contains(x))
+      .foldRight(ty)((x, t) => STy.TForall(x, None, t))
 
   def elaborateDecl(d: Decl, pos: Pos): Unit = d match
     case DDef(x, t, v) =>
       debug(s"elaborating def $x")
       val (tm, ty) =
-        t.map(pregeneralize).fold(elaborate(v, pos))(elaborate(v, _, pos))
-      debug(s"elaborated def $x: ${Ctx.pretty(tm)} : ${Ctx.pretty(ty)}")
+        t.fold(elaborate(v, pos))(t => elaborate(v, pregeneralize(t), pos))
       addGlobal(GlobalEntry(x, ty, eval(Nil, ty), tm))
+      debug(s"elaborated def $x")
+    case DType(x, ps, k, t) =>
+      debug(s"elaborating type $x")
+      val eps = ps.map((x, k) => (x, k.fold(newKMeta())(inferKind(_))))
+      val ctx = eps.foldLeft(Ctx.empty(pos)) { case (ctx, (x, k)) =>
+        ctx.bindTy(x, k)
+      }
+      val prety = pregeneralize(t, eps.map(_._1))
+      val (ty, ki) =
+        k.fold(elaborate(prety, ctx))(k => elaborate(prety, k, ctx))
+      checkMetasSolved()
+      val zonkedps = eps.map((x, k) => (x, zonk(k)))
+      val fullki = zonkedps.foldRight(ki) { case ((_, k), r) => KFun(k, r) }
+      addTGlobal(
+        TGlobalEntry(
+          x,
+          zonkedps,
+          ki,
+          fullki,
+          env => eval(env, ty),
+          ty
+        )
+      )
+      debug(s"elaborated type $x")
 
   def elaborateDecls(ds: Decls, pos: Pos): Unit =
     ds.decls.foreach(elaborateDecl(_, pos))

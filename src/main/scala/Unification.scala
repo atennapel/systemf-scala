@@ -37,9 +37,11 @@ object Unification:
 
   private def checkSolution(l: Lvl, ml: Lvl, id: MetaId, ty: Ty): Unit =
     ty match
-      case TVar(ix) if l - ix >= ml =>
-        throw UnifyError(s"out of scope variable: ?$id")
-      case TVar(_) => ()
+      case TVar(ix) =>
+        if l - ix - 1 >= ml then
+          throw UnifyError(s"out of scope variable: ?$id")
+        else ()
+      case TGlobal(_) => ()
       case TMeta(id2) if id == id2 =>
         throw UnifyError(s"occurs check failed: ?$id")
       case TMeta(_) => ()
@@ -56,7 +58,7 @@ object Unification:
     val ml = getTMetaUnsolved(id).lvl
     val ty = quote(l, v)
     checkSolution(l, ml, id, ty)
-    solveTMeta(id, v, quote(l, v))
+    solveTMeta(id, v, ty)
 
   private def unifySp(l: Lvl, sp1: Spine, sp2: Spine): Unit = (sp1, sp2) match
     case (Nil, Nil) => ()
@@ -67,7 +69,7 @@ object Unification:
 
   def unify(l: Lvl, t: VTy, u: VTy): Unit =
     debug(s"unify: ${quote(l, t)} ~ ${quote(l, u)}")
-    (force(t), force(u)) match
+    (force(t, false), force(u, false)) match
       case (VForall(_, k1, b1), VForall(_, k2, b2)) =>
         val v = VVar(l)
         unifyKind(k1, k2)
@@ -88,4 +90,15 @@ object Unification:
         solve(l, id, VNe(h, Nil))
       case (VNe(HMeta(id), Nil), v) => solve(l, id, v)
       case (v, VNe(HMeta(id), Nil)) => solve(l, id, v)
-      case (v1, v2)                 => throw UnifyError("failed to unify")
+      case (VGlobal(x, _, sp1, v), VGlobal(y, _, sp2, w)) if x == y =>
+        try unifySp(l, sp1, sp2)
+        catch
+          case e: UnifyError =>
+            (v, w) match
+              case (Right(vv), Right(ww)) => unify(l, vv(), ww())
+              case _                      => throw e
+      case (VGlobal(_, _, _, Right(v)), VGlobal(_, _, _, Right(w))) =>
+        unify(l, v(), w())
+      case (VGlobal(_, _, _, Right(v)), w) => unify(l, v(), w)
+      case (w, VGlobal(_, _, _, Right(v))) => unify(l, w, v())
+      case (v1, v2) => throw UnifyError("failed to unify")

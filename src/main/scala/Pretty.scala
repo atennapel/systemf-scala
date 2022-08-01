@@ -13,6 +13,7 @@ object Pretty:
 
   private def tyS(ty: CTy, ts: List[Name]): Ty = ty match
     case CTy.TVar(ix)   => TVar(ts(ix))
+    case CTy.TGlobal(x) => TVar(x)
     case CTy.TMeta(id)  => TVar(s"?$id")
     case CTy.TFun(l, r) => TFun(tyS(l, ts), tyS(r, ts))
     case CTy.TApp(l, r) => TApp(tyS(l, ts), tyS(r, ts))
