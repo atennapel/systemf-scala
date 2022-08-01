@@ -7,9 +7,11 @@ Based on https://github.com/AndrasKovacs/elaboration-zoo .
 
 - Optional explicit type abstraction and application
 - Kinds and kind inference
-- First-class polymorphism (aka impredicative instantiation)
 - Type aliases
 - Algebraic datatypes
+- First-class polymorphism (aka impredicative instantiation)
+
+## Limitations
 - No let-generalisation, except for on the top-level
 - No subtyping or subsumption
 
